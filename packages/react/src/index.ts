@@ -4,5 +4,8 @@ export type {
   ActionResult,
   ExecutionContext,
   InputSchema,
-  InputType
+  InputType,
+  ActionLog,
+  RollbackEntry,
+  EvaluationResult
 } from 'agent-action-registry';

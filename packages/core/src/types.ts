@@ -15,6 +15,7 @@ export interface Action<TInput = any, TOutput = any> {
   inputs: Record<string, InputSchema>;
   permissions?: string[];
   handler: (input: TInput, context?: ExecutionContext) => Promise<TOutput> | TOutput;
+  rollbackHandler?: (result: TOutput, input: TInput, context?: ExecutionContext) => Promise<void> | void;
 }
 
 export interface ExecutionContext {

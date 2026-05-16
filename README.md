@@ -26,9 +26,12 @@ Without an action registry, AI agents are forced to:
 - **Input validation** for string, number, boolean, enum, and object types
 - **Permission-based access control** to protect sensitive operations
 - **Structured execution results** with success/error states
+- **Action logging** - Track all executions with timestamps, inputs, outputs, and performance metrics
+- **Rollback/Undo** - Reversible actions with automatic history tracking
+- **Dry-run evaluation** - Validate actions before execution without side effects
 - **React integration** with Context and hooks
 - **Minimal dependencies** and simple API
-- **Full test coverage** for core functionality
+- **Full test coverage** for core functionality (23 passing tests)
 
 ---
 
@@ -215,6 +218,47 @@ Returns a specific action by ID.
 
 Removes an action from the registry.
 
+#### `evaluate(actionId, input, context?)`
+
+Evaluates an action without executing it.
+
+```typescript
+const evaluation = evaluate('action_id', { field: 'value' }, context);
+
+// Returns:
+{
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+```
+
+#### `rollback(actionId?)`
+
+Rolls back the last action or a specific action by ID.
+
+```typescript
+await rollback(); // Undo last action
+await rollback('action-log-id'); // Undo specific action
+```
+
+#### `getLogs(filter?)`
+
+Returns action execution logs.
+
+```typescript
+const logs = getLogs();
+const filtered = getLogs({ actionId: 'create_task', success: true });
+```
+
+#### `getHistory()`
+
+Returns rollback history.
+
+#### `canRollback()`
+
+Checks if any action can be rolled back.
+
 ### React Package
 
 #### `<AgentActionsProvider>`
@@ -240,7 +284,12 @@ const {
   registerAction,    // Register a new action
   unregisterAction,  // Remove an action
   getAction,         // Get action by ID
-  executeAction      // Execute an action
+  executeAction,     // Execute an action
+  evaluate,          // Evaluate action without executing
+  rollback,          // Rollback last or specific action
+  getLogs,           // Get execution logs
+  getHistory,        // Get rollback history
+  canRollback        // Check if rollback is available
 } = useAgentActions();
 ```
 
@@ -309,6 +358,203 @@ interface CreateTaskInput {
 const action: Action<CreateTaskInput, { taskId: string }> = {
   // Fully typed
 };
+```
+
+---
+
+## Advanced Features
+
+### Action Logging
+
+Track all action executions with detailed logs including timestamps, user context, inputs, outputs, and performance metrics.
+
+```typescript
+import { ActionRegistry, MemoryLogger, ConsoleLogger } from 'agent-action-registry';
+
+// Option 1: Memory logger (stores in memory)
+const logger = new MemoryLogger(1000); // Keep last 1000 logs
+const registry = new ActionRegistry({ logger });
+
+// Option 2: Console logger (logs to console + memory)
+const consoleLogger = new ConsoleLogger();
+const registry2 = new ActionRegistry({ logger: consoleLogger });
+
+// Register and execute actions
+registerAction({ /* ... */ });
+await executeAction('action-id', { /* ... */ });
+
+// Get all logs
+const allLogs = getLogs();
+
+// Filter logs
+const userLogs = getLogs({ userId: 'user-123' });
+const failedLogs = getLogs({ success: false });
+const actionLogs = getLogs({ actionId: 'create_task' });
+
+// Get stats (MemoryLogger only)
+const stats = logger.getStats();
+// { total, successful, failed, successRate, avgDuration }
+```
+
+Each log entry includes:
+- `id`: Unique log ID
+- `actionId`: The action that was executed
+- `actionName`: Human-readable action name
+- `timestamp`: When it executed
+- `userId`: User who executed it (if in context)
+- `input`: Input data
+- `result`: Execution result
+- `duration`: Execution time in milliseconds
+- `context`: Full execution context
+
+### Rollback/Undo
+
+Make actions reversible by defining rollback handlers. The registry automatically tracks execution history.
+
+```typescript
+import { ActionRegistry, MemoryRollbackManager } from 'agent-action-registry';
+
+const rollbackManager = new MemoryRollbackManager(100); // Keep last 100 actions
+const registry = new ActionRegistry({ rollbackManager });
+
+registerAction({
+  id: 'create_invoice',
+  name: 'Create Invoice',
+  description: 'Creates an invoice',
+  inputs: {
+    customerId: { type: 'string', required: true },
+    amount: { type: 'number', required: true }
+  },
+  handler: async ({ customerId, amount }) => {
+    const invoice = await createInvoice(customerId, amount);
+    return { invoiceId: invoice.id };
+  },
+  // Define how to undo this action
+  rollbackHandler: async (result, input) => {
+    await deleteInvoice(result.invoiceId);
+  }
+});
+
+// Execute action
+await executeAction('create_invoice', { customerId: 'cust-123', amount: 500 });
+
+// Check if rollback is available
+if (canRollback()) {
+  // Undo the last action
+  await rollback();
+}
+
+// Rollback a specific action by ID
+await rollback('action-log-id');
+
+// Get rollback history
+const history = getHistory();
+```
+
+**Important**: Only actions with a `rollbackHandler` can be undone. Actions without rollback handlers are still tracked but cannot be rolled back.
+
+### Dry-Run Evaluation
+
+Validate actions before execution without side effects.
+
+```typescript
+import { evaluate, executeAction } from 'agent-action-registry';
+
+// Evaluate without executing
+const evaluation = evaluate('create_invoice', {
+  customerId: 'cust-123',
+  amount: 500
+}, {
+  permissions: ['billing:write']
+});
+
+if (evaluation.valid) {
+  console.log('Action is valid!');
+  if (evaluation.warnings.length > 0) {
+    console.warn('Warnings:', evaluation.warnings);
+  }
+
+  // Now execute for real
+  await executeAction('create_invoice', { /* ... */ });
+} else {
+  console.error('Validation errors:', evaluation.errors);
+}
+
+// Or use dry-run mode
+const result = await executeAction('create_invoice', {
+  customerId: 'cust-123',
+  amount: 500
+}, undefined, { dryRun: true });
+
+// result.data.evaluation contains validation results
+// result.data.dryRun === true
+```
+
+Evaluation checks:
+- Input validation (types, required fields)
+- Permission requirements
+- Missing context
+- Extra fields (warnings only)
+
+### React Integration with Advanced Features
+
+```tsx
+import { AgentActionsProvider, useAgentActions } from '@agent-action-registry/react';
+import { ActionRegistry, MemoryLogger, MemoryRollbackManager } from 'agent-action-registry';
+
+// Create registry with advanced features
+const logger = new MemoryLogger();
+const rollbackManager = new MemoryRollbackManager();
+const registry = new ActionRegistry({ logger, rollbackManager });
+
+function App() {
+  return (
+    <AgentActionsProvider registry={registry} context={{ userId: 'user-123', permissions: ['...'] }}>
+      <Dashboard />
+    </AgentActionsProvider>
+  );
+}
+
+function Dashboard() {
+  const {
+    executeAction,
+    evaluate,
+    rollback,
+    canRollback,
+    getLogs,
+    getHistory
+  } = useAgentActions();
+
+  const handleExecute = async () => {
+    // Evaluate first
+    const eval = evaluate('create_task', { title: 'New Task' });
+
+    if (eval.valid) {
+      // Execute
+      const result = await executeAction('create_task', { title: 'New Task' });
+
+      if (result.success) {
+        console.log('Task created!');
+        console.log('Execution logs:', getLogs());
+        console.log('Can undo:', canRollback());
+      }
+    }
+  };
+
+  const handleUndo = async () => {
+    if (canRollback()) {
+      await rollback();
+      console.log('Action undone!');
+    }
+  };
+
+  return (
+    <div>
+      <button onClick={handleExecute}>Execute Action</button>
+      <button onClick={handleUndo} disabled={!canRollback()}>Undo Last Action</button>
+    </div>
+  );
+}
 ```
 
 ---
@@ -396,20 +642,25 @@ registerAction({
 
 ## Roadmap
 
-This is an experimental open-source project. Future improvements may include:
+This is an experimental open-source project. Completed features:
+
+- [x] **Audit Logging**: Automatic logging of all action executions ✅
+- [x] **Undo/Redo**: Support for reversible actions ✅
+- [x] **Dry Run Mode**: Test actions without side effects ✅
+
+Future improvements may include:
 
 - [ ] **Action Discovery Protocol**: Standardized format for AI agents to discover available actions
 - [ ] **Rate Limiting**: Built-in rate limiting per action or user
-- [ ] **Audit Logging**: Automatic logging of all action executions
 - [ ] **Action Versioning**: Support for multiple versions of the same action
 - [ ] **Middleware System**: Pre/post execution hooks
 - [ ] **Action Composition**: Chain multiple actions together
 - [ ] **OpenAPI Export**: Generate OpenAPI specs from registered actions
-- [ ] **Undo/Redo**: Support for reversible actions
-- [ ] **Dry Run Mode**: Test actions without side effects
 - [ ] **Action Templates**: Pre-built common actions
 - [ ] **WebSocket Support**: Real-time action execution updates
 - [ ] **Multi-tenant Support**: Isolate actions per tenant
+- [ ] **Persistent logging**: Database-backed logging and analytics
+- [ ] **Time-travel debugging**: Replay action sequences
 
 ---
 

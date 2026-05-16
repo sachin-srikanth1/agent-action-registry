@@ -1,6 +1,6 @@
 {
   "name": "agent-action-registry",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Expose safe, structured frontend actions for AI agents",
   "type": "module",
   "main": "./dist/index.js",
